@@ -147,7 +147,7 @@ fn test_symlink() {
         .success();
 
     assert!(
-        !link.symlink_metadata().is_ok(),
+        link.symlink_metadata().is_err(),
         "Symlink should have been removed"
     );
     assert!(target.exists(), "Target should still exist");
