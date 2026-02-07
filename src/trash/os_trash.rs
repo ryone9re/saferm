@@ -39,14 +39,13 @@ impl TrashHandler for OsTrash {
 
         #[cfg(all(unix, not(target_os = "macos")))]
         {
-            let items: Vec<_> = trash::os_limited::list()
+            let items = trash::os_limited::list()
                 .with_context(|| {
                     t!(
                         "error_cleanup_failed",
                         reason = "failed to list trash items"
                     )
-                })?
-                .collect();
+                })?;
 
             if items.is_empty() {
                 println!("{}", t!("cleanup_nothing"));

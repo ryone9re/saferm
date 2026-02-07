@@ -88,8 +88,6 @@ When a version tag (`v*`) is pushed, the release workflow builds static binaries
 | Target | Binary type |
 |--------|-------------|
 | `x86_64-unknown-linux-musl` | Static (musl, no glibc dependency) |
-| `aarch64-unknown-linux-musl` | Static (musl, no glibc dependency) |
-| `x86_64-apple-darwin` | Native |
 | `aarch64-apple-darwin` | Native (Apple Silicon) |
 
 ```bash
@@ -106,13 +104,11 @@ git push origin v0.1.0
 - `cargo clippy -- -D warnings`
 - `cargo test`
 
-バージョンタグ (`v*`) を push すると、リリースワークフローが4ターゲットの静的バイナリをビルドし GitHub Release を作成します:
+バージョンタグ (`v*`) を push すると、リリースワークフローが2ターゲットのバイナリをビルドし GitHub Release を作成します:
 
 | ターゲット | バイナリ種別 |
 |--------|-------------|
 | `x86_64-unknown-linux-musl` | 静的リンク (musl、glibc 依存なし) |
-| `aarch64-unknown-linux-musl` | 静的リンク (musl、glibc 依存なし) |
-| `x86_64-apple-darwin` | ネイティブ |
 | `aarch64-apple-darwin` | ネイティブ (Apple Silicon) |
 
 ```bash
