@@ -49,8 +49,10 @@ fn process_target(
         }
     }
 
-    // Prompt for confirmation (skip if -f)
-    if !cli.force {
+    // Always prompt when connected to a TTY; skip only with -f in non-TTY (scripts/CI)
+    let should_prompt = std::io::IsTerminal::is_terminal(&std::io::stdin()) || !cli.force;
+
+    if should_prompt {
         let msg = if target.is_dir() {
             t!("confirm_trash_dir", name = target.display().to_string())
         } else {
