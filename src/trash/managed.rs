@@ -90,6 +90,17 @@ impl ManagedTrash {
 
 impl TrashHandler for ManagedTrash {
     fn trash(&self, path: &Path) -> Result<()> {
+        // Symlinks: remove directly to avoid canonicalize() resolving the target
+        if path.is_symlink() {
+            return std::fs::remove_file(path).with_context(|| {
+                t!(
+                    "error_trash_failed",
+                    name = path.display().to_string(),
+                    reason = "failed to remove symlink"
+                )
+            });
+        }
+
         self.ensure_dirs()?;
 
         let canonical = path
