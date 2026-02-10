@@ -9,7 +9,7 @@ A safe `rm` replacement — moves files to trash instead of permanent deletion.
 - **Drop-in replacement for `rm`** — supports `-r`, `-f`, `-i`, `-d`, `-v`, `--` flags
 - **OS-native trash** — uses macOS Trash / FreeDesktop Trash on Linux desktop environments
 - **Managed trash fallback** — self-managed `~/.local/share/saferm/trash/` for headless Linux servers
-- **Confirmation prompt** — always asks before deletion (y/N), skippable with `-f`
+- **Confirmation prompt** — always asks before deletion (y/N) in interactive terminals; `-f` skips only in non-TTY (scripts/CI)
 - **Trash cleanup** — `--cleanup` to empty the trash
 - **Bilingual** — English & Japanese (auto-detected from system locale)
 
@@ -18,7 +18,7 @@ A safe `rm` replacement — moves files to trash instead of permanent deletion.
 - **`rm` のドロップイン代替** — `-r`, `-f`, `-i`, `-d`, `-v`, `--` フラグに対応
 - **OS標準ゴミ箱** — macOS Trash / Linux デスクトップ環境の FreeDesktop Trash を使用
 - **管理ゴミ箱フォールバック** — ヘッドレスLinuxサーバー向けに `~/.local/share/saferm/trash/` を自動管理
-- **確認プロンプト** — 削除前に必ず確認 (y/N)、`-f` でスキップ可能
+- **確認プロンプト** — 対話端末では削除前に必ず確認 (y/N)、`-f` は非TTY環境（スクリプト/CI）でのみスキップ
 - **ゴミ箱クリーンアップ** — `--cleanup` でゴミ箱を空に
 - **バイリンガル** — 英語・日本語（システムロケールから自動検出）
 
@@ -37,7 +37,7 @@ saferm file.txt
 # Move multiple files / 複数ファイルをゴミ箱に移動
 saferm file1.txt file2.txt file3.txt
 
-# Force (skip confirmation) / 確認をスキップ
+# Force (skip confirmation in non-TTY) / 非TTYで確認をスキップ
 saferm -f file.txt
 
 # Remove a directory recursively / ディレクトリを再帰的に削除
@@ -55,7 +55,7 @@ saferm --cleanup
 | Flag | Description | 説明 |
 |------|-------------|------|
 | `-r`, `-R`, `--recursive` | Remove directories and contents | ディレクトリとその中身を再帰的に削除 |
-| `-f`, `--force` | Skip confirmation, ignore nonexistent files | 確認をスキップ、存在しないファイルを無視 |
+| `-f`, `--force` | Skip confirmation in non-TTY, ignore nonexistent files | 非TTYで確認をスキップ、存在しないファイルを無視 |
 | `-i`, `--interactive` | Prompt before every removal (default) | 毎回確認する（デフォルト動作） |
 | `-d`, `--dir` | Remove empty directories | 空ディレクトリを削除 |
 | `-v`, `--verbose` | Explain what is being done | 実行内容を表示 |
@@ -83,7 +83,7 @@ Pull requests and pushes to `main` are checked automatically on both Ubuntu and 
 - `cargo clippy -- -D warnings`
 - `cargo test`
 
-When a version tag (`v*`) is pushed, the release workflow builds static binaries for 4 targets and publishes a GitHub Release:
+When a version tag (`v*`) is pushed, the release workflow builds static binaries for 2 targets and publishes a GitHub Release:
 
 | Target | Binary type |
 |--------|-------------|
@@ -92,8 +92,8 @@ When a version tag (`v*`) is pushed, the release workflow builds static binaries
 
 ```bash
 # Create a release / リリースを作成
-git tag v0.1.0
-git push origin v0.1.0
+git tag v1.2.0
+git push origin v1.2.0
 ```
 
 ---
@@ -113,8 +113,8 @@ git push origin v0.1.0
 
 ```bash
 # Create a release / リリースを作成
-git tag v0.1.0
-git push origin v0.1.0
+git tag v1.2.0
+git push origin v1.2.0
 ```
 
 ## Development / 開発
