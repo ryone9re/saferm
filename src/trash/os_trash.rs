@@ -389,43 +389,43 @@ impl TrashHandler for OsTrash {
             match trash::os_limited::restore_all(to_restore) {
                 Ok(()) => {
                     // If destination differs from original, move after native restore
-                    if destination != original_path {
-                        if let Err(e) = fs::rename(&original_path, destination) {
-                            // Rename failed — rollback evicted file before returning error
-                            if let Some(tmp) = &temp_evict {
-                                if let Err(re) = fs::rename(tmp, &original_path) {
-                                    eprintln!(
-                                        "saferm: warning: rollback failed for '{}': {}",
-                                        original_path.display(),
-                                        re
-                                    );
-                                }
-                            }
-                            return Err(e.into());
-                        }
-                    }
-                    // Put back the evicted file
-                    if let Some(tmp) = temp_evict {
-                        if let Err(e) = fs::rename(&tmp, &original_path) {
-                            eprintln!(
-                                "saferm: warning: failed to restore evicted file '{}': {}",
-                                original_path.display(),
-                                e
-                            );
-                        }
-                    }
-                    Ok(())
-                }
-                Err(e) => {
-                    // Rollback: put back the evicted file
-                    if let Some(tmp) = temp_evict {
-                        if let Err(re) = fs::rename(&tmp, &original_path) {
+                    if destination != original_path
+                        && let Err(e) = fs::rename(&original_path, destination)
+                    {
+                        // Rename failed — rollback evicted file before returning error
+                        if let Some(tmp) = &temp_evict
+                            && let Err(re) = fs::rename(tmp, &original_path)
+                        {
                             eprintln!(
                                 "saferm: warning: rollback failed for '{}': {}",
                                 original_path.display(),
                                 re
                             );
                         }
+                        return Err(e.into());
+                    }
+                    // Put back the evicted file
+                    if let Some(tmp) = temp_evict
+                        && let Err(e) = fs::rename(&tmp, &original_path)
+                    {
+                        eprintln!(
+                            "saferm: warning: failed to restore evicted file '{}': {}",
+                            original_path.display(),
+                            e
+                        );
+                    }
+                    Ok(())
+                }
+                Err(e) => {
+                    // Rollback: put back the evicted file
+                    if let Some(tmp) = temp_evict
+                        && let Err(re) = fs::rename(&tmp, &original_path)
+                    {
+                        eprintln!(
+                            "saferm: warning: rollback failed for '{}': {}",
+                            original_path.display(),
+                            re
+                        );
                     }
                     match e {
                         trash::Error::RestoreCollision { .. } => {
