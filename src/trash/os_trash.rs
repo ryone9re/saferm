@@ -386,7 +386,19 @@ impl TrashHandler for OsTrash {
                 Ok(()) => {
                     // If destination differs from original, move after native restore
                     if destination != original_path {
-                        fs::rename(&original_path, destination)?;
+                        if let Err(e) = fs::rename(&original_path, destination) {
+                            // Rename failed — rollback evicted file before returning error
+                            if let Some(tmp) = &temp_evict {
+                                if let Err(re) = fs::rename(tmp, &original_path) {
+                                    eprintln!(
+                                        "saferm: warning: rollback failed for '{}': {}",
+                                        original_path.display(),
+                                        re
+                                    );
+                                }
+                            }
+                            return Err(e.into());
+                        }
                     }
                     // Put back the evicted file
                     if let Some(tmp) = temp_evict {
