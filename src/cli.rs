@@ -5,8 +5,8 @@ use std::path::PathBuf;
 #[derive(Parser, Debug)]
 #[command(name = "saferm", version, about)]
 pub struct Cli {
-    /// Files or directories to remove
-    #[arg(required_unless_present = "cleanup")]
+    /// Files or directories to remove (or filter pattern when used with --restore)
+    #[arg(required_unless_present_any = ["cleanup", "restore"])]
     pub targets: Vec<PathBuf>,
 
     /// Remove directories and their contents recursively
@@ -32,6 +32,10 @@ pub struct Cli {
     pub verbose: bool,
 
     /// Empty the trash
-    #[arg(long)]
+    #[arg(long, conflicts_with = "restore")]
     pub cleanup: bool,
+
+    /// Restore files from the trash to their original location
+    #[arg(long)]
+    pub restore: bool,
 }
