@@ -1,7 +1,10 @@
 use anyhow::{Context, Result};
 use rust_i18n::t;
+#[cfg(target_os = "macos")]
 use std::collections::HashSet;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
+#[cfg(target_os = "macos")]
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -351,6 +354,7 @@ impl TrashHandler for OsTrash {
             }
 
             let original_path = to_restore[0].original_path();
+            let item_name = to_restore[0].name.to_string_lossy().to_string();
 
             // If dest differs and the original path is occupied (rename/overwrite case),
             // temporarily move the occupying file so restore_all won't collide.
@@ -382,7 +386,7 @@ impl TrashHandler for OsTrash {
                     None
                 };
 
-            match trash::os_limited::restore_all(&to_restore) {
+            match trash::os_limited::restore_all(to_restore) {
                 Ok(()) => {
                     // If destination differs from original, move after native restore
                     if destination != original_path {
@@ -425,10 +429,7 @@ impl TrashHandler for OsTrash {
                     }
                     match e {
                         trash::Error::RestoreCollision { .. } => {
-                            anyhow::bail!(t!(
-                                "restore_conflict",
-                                name = to_restore[0].name.to_string_lossy()
-                            ))
+                            anyhow::bail!(t!("restore_conflict", name = item_name))
                         }
                         other => Err(anyhow::anyhow!(other)),
                     }
