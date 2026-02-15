@@ -229,11 +229,17 @@ fn run_restore(cli: &Cli, handler: &dyn TrashHandler, prompter: &dyn Prompter) -
             Ok(()) => {
                 // Restore succeeded — delete backup if we had one
                 if let Some(bp) = backup_path {
-                    let meta = std::fs::symlink_metadata(&bp);
-                    let _ = match meta {
+                    let cleanup_result = match std::fs::symlink_metadata(&bp) {
                         Ok(m) if m.is_dir() => std::fs::remove_dir_all(&bp),
                         _ => std::fs::remove_file(&bp),
                     };
+                    if let Err(e) = cleanup_result {
+                        eprintln!(
+                            "saferm: warning: failed to remove backup '{}': {}",
+                            bp.display(),
+                            e
+                        );
+                    }
                 }
                 if cli.verbose {
                     println!(
@@ -248,8 +254,14 @@ fn run_restore(cli: &Cli, handler: &dyn TrashHandler, prompter: &dyn Prompter) -
             }
             Err(e) => {
                 // Restore failed — rollback: move backup back to dest
-                if let Some(bp) = backup_path {
-                    let _ = std::fs::rename(&bp, &dest);
+                if let Some(bp) = backup_path
+                    && let Err(re) = std::fs::rename(&bp, &dest)
+                {
+                    eprintln!(
+                        "saferm: warning: rollback failed for '{}': {}",
+                        dest.display(),
+                        re
+                    );
                 }
                 eprintln!(
                     "saferm: {}",

@@ -357,14 +357,25 @@ impl TrashHandler for OsTrash {
             let temp_evict: Option<PathBuf> =
                 if destination != original_path && original_path.exists() {
                     let parent = original_path.parent().unwrap_or(Path::new("."));
-                    let tmp = parent.join(format!(
+                    let base_name = original_path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy();
+                    let mut tmp = parent.join(format!(
                         ".saferm-evict-{}-{}",
                         std::process::id(),
-                        original_path
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_string_lossy()
+                        base_name
                     ));
+                    let mut counter = 0u64;
+                    while tmp.exists() {
+                        counter += 1;
+                        tmp = parent.join(format!(
+                            ".saferm-evict-{}-{}-{}",
+                            std::process::id(),
+                            counter,
+                            base_name
+                        ));
+                    }
                     fs::rename(&original_path, &tmp)?;
                     Some(tmp)
                 } else {
@@ -379,14 +390,26 @@ impl TrashHandler for OsTrash {
                     }
                     // Put back the evicted file
                     if let Some(tmp) = temp_evict {
-                        let _ = fs::rename(&tmp, &original_path);
+                        if let Err(e) = fs::rename(&tmp, &original_path) {
+                            eprintln!(
+                                "saferm: warning: failed to restore evicted file '{}': {}",
+                                original_path.display(),
+                                e
+                            );
+                        }
                     }
                     Ok(())
                 }
                 Err(e) => {
                     // Rollback: put back the evicted file
                     if let Some(tmp) = temp_evict {
-                        let _ = fs::rename(&tmp, &original_path);
+                        if let Err(re) = fs::rename(&tmp, &original_path) {
+                            eprintln!(
+                                "saferm: warning: rollback failed for '{}': {}",
+                                original_path.display(),
+                                re
+                            );
+                        }
                     }
                     match e {
                         trash::Error::RestoreCollision { .. } => {
