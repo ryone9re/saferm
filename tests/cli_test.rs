@@ -4,7 +4,10 @@ use std::fs;
 use tempfile::TempDir;
 
 fn saferm() -> assert_cmd::Command {
-    cargo_bin_cmd!("saferm")
+    let mut cmd = cargo_bin_cmd!("saferm");
+    // Use managed trash backend in tests for portability across environments
+    cmd.env("SAFERM_TRASH_BACKEND", "managed");
+    cmd
 }
 
 #[test]
@@ -203,14 +206,49 @@ fn test_partial_failure_exits_nonzero() {
     let file = tmp.path().join("exists.txt");
     fs::write(&file, "data").unwrap();
 
-    // Without -f, nonexistent files cause an error
+    // Without -f in non-TTY, both targets fail:
+    // - existing file: refused (no TTY for confirmation)
+    // - nonexistent file: not found error
     saferm()
         .args([file.to_str().unwrap(), "/nonexistent/should_fail.txt"])
-        // Pipe stdin to /dev/null to auto-deny prompts, but use -f for the
-        // existing file and omit it for the nonexistent one won't work since
-        // -f is global. Instead, we test that running without -f against a
-        // nonexistent file fails (the existing file prompt will be denied
-        // due to non-interactive stdin, but that's OK for this test).
         .assert()
         .failure();
+}
+
+#[test]
+fn test_symlink_to_dir_without_recursive() {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path().join("realdir");
+    fs::create_dir(&dir).unwrap();
+    fs::write(dir.join("inner.txt"), "content").unwrap();
+    let link = tmp.path().join("linkdir");
+    std::os::unix::fs::symlink(&dir, &link).unwrap();
+
+    // Symlink to directory should NOT require -r (matches rm behavior)
+    saferm()
+        .args(["-f", link.to_str().unwrap()])
+        .assert()
+        .success();
+
+    assert!(
+        link.symlink_metadata().is_err(),
+        "Symlink should have been removed"
+    );
+    assert!(dir.exists(), "Real directory should still exist");
+}
+
+#[test]
+fn test_non_tty_without_force_gives_clear_error() {
+    let tmp = TempDir::new().unwrap();
+    let file = tmp.path().join("test.txt");
+    fs::write(&file, "data").unwrap();
+
+    // assert_cmd runs without a TTY — should get clear error, not IO crash
+    saferm()
+        .arg(file.to_str().unwrap())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no TTY").or(predicate::str::contains("TTYがありません")));
+
+    assert!(file.exists(), "File should NOT have been deleted");
 }

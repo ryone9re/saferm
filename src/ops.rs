@@ -12,10 +12,11 @@ pub fn run(cli: &Cli, handler: &dyn TrashHandler, prompter: &dyn Prompter) -> Re
         return Ok(true);
     }
 
+    let is_tty = std::io::IsTerminal::is_terminal(&std::io::stdin());
     let mut all_ok = true;
 
     for target in &cli.targets {
-        if let Err(e) = process_target(target, cli, handler, prompter) {
+        if let Err(e) = process_target(target, cli, handler, prompter, is_tty) {
             eprintln!("saferm: {}", e);
             all_ok = false;
         }
@@ -29,6 +30,7 @@ fn process_target(
     cli: &Cli,
     handler: &dyn TrashHandler,
     prompter: &dyn Prompter,
+    is_tty: bool,
 ) -> Result<()> {
     // Check existence
     if !target.exists() && !target.is_symlink() {
@@ -38,8 +40,9 @@ fn process_target(
         anyhow::bail!(t!("error_not_found", name = target.display().to_string()));
     }
 
-    // Directory check
-    if target.is_dir() {
+    // Directory check — symlinks to directories are treated as symlinks, not directories.
+    // Real rm removes symlinks without -r regardless of what they point to.
+    if target.is_dir() && !target.is_symlink() {
         if !cli.recursive && !cli.dir {
             anyhow::bail!(t!("error_is_dir", name = target.display().to_string()));
         }
@@ -49,11 +52,17 @@ fn process_target(
         }
     }
 
-    // Always prompt when connected to a TTY; skip only with -f in non-TTY (scripts/CI)
-    let should_prompt = std::io::IsTerminal::is_terminal(&std::io::stdin()) || !cli.force;
+    // Non-TTY without -f: refuse with a clear error (never attempt interactive prompt)
+    if !is_tty && !cli.force {
+        anyhow::bail!(t!(
+            "error_non_interactive",
+            name = target.display().to_string()
+        ));
+    }
 
-    if should_prompt {
-        let msg = if target.is_dir() {
+    // TTY: always prompt (even with -f — saferm's core safety feature)
+    if is_tty {
+        let msg = if target.is_dir() && !target.is_symlink() {
             t!("confirm_trash_dir", name = target.display().to_string())
         } else {
             t!("confirm_trash", name = target.display().to_string())
@@ -66,6 +75,7 @@ fn process_target(
             return Ok(());
         }
     }
+    // Non-TTY with -f: skip prompt (script/CI usage)
 
     // Move to trash
     handler.trash(target)?;
@@ -225,10 +235,26 @@ mod tests {
         fs::write(&file, "hello").unwrap();
 
         let handler = MockTrash::new();
-        let cli = make_cli(vec![file], false, false, false);
-        let result = run(&cli, &handler, &DenyPrompter).unwrap();
+        let cli = make_cli(vec![file.clone()], false, false, false);
+        // Call process_target directly with is_tty=true to test prompt denial
+        let result = process_target(&file, &cli, &handler, &DenyPrompter, true);
 
-        assert!(result);
+        assert!(result.is_ok());
+        assert!(handler.trashed_paths().is_empty());
+    }
+
+    #[test]
+    fn test_non_tty_without_force_refuses() {
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("test.txt");
+        fs::write(&file, "hello").unwrap();
+
+        let handler = MockTrash::new();
+        let cli = make_cli(vec![file.clone()], false, false, false);
+        // Non-TTY without -f should refuse with an error
+        let result = process_target(&file, &cli, &handler, &AutoConfirmPrompter, false);
+
+        assert!(result.is_err());
         assert!(handler.trashed_paths().is_empty());
     }
 
@@ -237,14 +263,35 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let file = tmp.path().join("exists.txt");
         fs::write(&file, "hello").unwrap();
-        let missing = PathBuf::from("/nonexistent/file.txt");
+        // A non-empty directory without -r will fail
+        let dir = tmp.path().join("mydir");
+        fs::create_dir(&dir).unwrap();
+        fs::write(dir.join("inner.txt"), "data").unwrap();
 
         let handler = MockTrash::new();
-        let cli = make_cli(vec![file.clone(), missing], false, false, false);
+        // force=true for non-TTY, recursive=false so directory fails
+        let cli = make_cli(vec![file.clone(), dir], true, false, false);
         let result = run(&cli, &handler, &AutoConfirmPrompter).unwrap();
 
-        // Should return false (partial failure) but still trash the existing file
+        // Should return false (partial failure from dir) but still trash the file
         assert!(!result);
         assert_eq!(handler.trashed_paths(), vec![file]);
+    }
+
+    #[test]
+    fn test_symlink_to_dir_without_recursive() {
+        let tmp = TempDir::new().unwrap();
+        let real_dir = tmp.path().join("realdir");
+        fs::create_dir(&real_dir).unwrap();
+        let link = tmp.path().join("linkdir");
+        std::os::unix::fs::symlink(&real_dir, &link).unwrap();
+
+        let handler = MockTrash::new();
+        // No -r flag — symlink to directory should still be accepted
+        let cli = make_cli(vec![link.clone()], true, false, false);
+        let result = run(&cli, &handler, &AutoConfirmPrompter).unwrap();
+
+        assert!(result);
+        assert_eq!(handler.trashed_paths(), vec![link]);
     }
 }

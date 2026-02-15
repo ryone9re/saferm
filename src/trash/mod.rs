@@ -11,6 +11,23 @@ pub trait TrashHandler {
 }
 
 pub fn create_handler() -> Box<dyn TrashHandler> {
+    if let Ok(backend) = std::env::var("SAFERM_TRASH_BACKEND") {
+        return match backend.as_str() {
+            "os" => Box::new(os_trash::OsTrash),
+            "managed" => Box::new(managed::ManagedTrash::new()),
+            other => {
+                eprintln!(
+                    "saferm: unknown SAFERM_TRASH_BACKEND '{}', using default",
+                    other
+                );
+                default_handler()
+            }
+        };
+    }
+    default_handler()
+}
+
+fn default_handler() -> Box<dyn TrashHandler> {
     if should_use_os_trash() {
         Box::new(os_trash::OsTrash)
     } else {
