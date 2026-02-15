@@ -108,8 +108,15 @@ fn run_restore(cli: &Cli, handler: &dyn TrashHandler, prompter: &dyn Prompter) -
         anyhow::bail!("--restore accepts at most one filter pattern");
     }
 
-    // Use first target as an optional filter pattern
-    let filter = cli.targets.first().and_then(|p| p.to_str());
+    // Use first target as an optional filter pattern (reject non-UTF8)
+    let filter = if let Some(p) = cli.targets.first() {
+        match p.to_str() {
+            Some(s) => Some(s),
+            None => anyhow::bail!("--restore filter pattern must be valid UTF-8"),
+        }
+    } else {
+        None
+    };
 
     let items = handler.list_restorable(filter)?;
 
@@ -164,6 +171,7 @@ fn run_restore(cli: &Cli, handler: &dyn TrashHandler, prompter: &dyn Prompter) -
         }
 
         // Conflict handling
+        let mut backup_path: Option<std::path::PathBuf> = None;
         if dest.exists() {
             if !is_tty && cli.force {
                 // Non-interactive: skip on conflict (safe default)
@@ -198,14 +206,10 @@ fn run_restore(cli: &Cli, handler: &dyn TrashHandler, prompter: &dyn Prompter) -
 
             match choice {
                 0 => {
-                    // Overwrite: remove existing
-                    // Check symlink first to avoid following symlink-to-dir
-                    let meta = std::fs::symlink_metadata(&dest)?;
-                    if meta.is_dir() {
-                        std::fs::remove_dir_all(&dest)?;
-                    } else {
-                        std::fs::remove_file(&dest)?;
-                    }
+                    // Overwrite: move existing to temp backup (rollback on failure)
+                    let tmp = generate_backup_path(&dest);
+                    std::fs::rename(&dest, &tmp)?;
+                    backup_path = Some(tmp);
                 }
                 1 => {
                     // Skip
@@ -223,6 +227,14 @@ fn run_restore(cli: &Cli, handler: &dyn TrashHandler, prompter: &dyn Prompter) -
 
         match handler.restore_to(&item.id, &dest) {
             Ok(()) => {
+                // Restore succeeded — delete backup if we had one
+                if let Some(bp) = backup_path {
+                    let meta = std::fs::symlink_metadata(&bp);
+                    let _ = match meta {
+                        Ok(m) if m.is_dir() => std::fs::remove_dir_all(&bp),
+                        _ => std::fs::remove_file(&bp),
+                    };
+                }
                 if cli.verbose {
                     println!(
                         "{}",
@@ -235,6 +247,10 @@ fn run_restore(cli: &Cli, handler: &dyn TrashHandler, prompter: &dyn Prompter) -
                 }
             }
             Err(e) => {
+                // Restore failed — rollback: move backup back to dest
+                if let Some(bp) = backup_path {
+                    let _ = std::fs::rename(&bp, &dest);
+                }
                 eprintln!(
                     "saferm: {}",
                     t!(
@@ -249,6 +265,28 @@ fn run_restore(cli: &Cli, handler: &dyn TrashHandler, prompter: &dyn Prompter) -
     }
 
     Ok(all_ok)
+}
+
+/// Generate a temporary backup path for safe overwrite.
+fn generate_backup_path(path: &Path) -> std::path::PathBuf {
+    let parent = path.parent().unwrap_or(Path::new("."));
+    let name = path.file_name().unwrap_or(std::ffi::OsStr::new("file"));
+    let mut backup = parent.join(format!(
+        ".saferm-backup-{}-{}",
+        std::process::id(),
+        name.to_string_lossy()
+    ));
+    let mut counter = 0u64;
+    while backup.exists() {
+        counter += 1;
+        backup = parent.join(format!(
+            ".saferm-backup-{}-{}-{}",
+            std::process::id(),
+            counter,
+            name.to_string_lossy()
+        ));
+    }
+    backup
 }
 
 /// Generate a rename path by appending ".restored" or a counter suffix.

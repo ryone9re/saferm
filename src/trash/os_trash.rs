@@ -350,25 +350,54 @@ impl TrashHandler for OsTrash {
                 anyhow::bail!(t!("restore_not_found"));
             }
 
-            // Try native restore first
             let original_path = to_restore[0].original_path();
+
+            // If dest differs and the original path is occupied (rename/overwrite case),
+            // temporarily move the occupying file so restore_all won't collide.
+            let temp_evict: Option<PathBuf> =
+                if destination != original_path && original_path.exists() {
+                    let parent = original_path.parent().unwrap_or(Path::new("."));
+                    let tmp = parent.join(format!(
+                        ".saferm-evict-{}-{}",
+                        std::process::id(),
+                        original_path
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                    ));
+                    fs::rename(&original_path, &tmp)?;
+                    Some(tmp)
+                } else {
+                    None
+                };
+
             match trash::os_limited::restore_all(&to_restore) {
                 Ok(()) => {
                     // If destination differs from original, move after native restore
                     if destination != original_path {
                         fs::rename(&original_path, destination)?;
                     }
+                    // Put back the evicted file
+                    if let Some(tmp) = temp_evict {
+                        let _ = fs::rename(&tmp, &original_path);
+                    }
                     Ok(())
                 }
-                Err(trash::Error::RestoreCollision { .. }) => {
-                    // Collision on native restore — caller should have handled conflict
-                    // Fall back: the item is still in trash, report error
-                    anyhow::bail!(t!(
-                        "restore_conflict",
-                        name = to_restore[0].name.to_string_lossy()
-                    ))
+                Err(e) => {
+                    // Rollback: put back the evicted file
+                    if let Some(tmp) = temp_evict {
+                        let _ = fs::rename(&tmp, &original_path);
+                    }
+                    match e {
+                        trash::Error::RestoreCollision { .. } => {
+                            anyhow::bail!(t!(
+                                "restore_conflict",
+                                name = to_restore[0].name.to_string_lossy()
+                            ))
+                        }
+                        other => Err(anyhow::anyhow!(other)),
+                    }
                 }
-                Err(e) => Err(anyhow::anyhow!(e)),
             }
         }
     }
