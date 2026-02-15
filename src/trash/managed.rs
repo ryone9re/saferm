@@ -19,10 +19,22 @@ impl Default for ManagedTrash {
 
 impl ManagedTrash {
     pub fn new() -> Self {
-        let base_dir = dirs::data_dir()
-            .unwrap_or_else(|| PathBuf::from("~/.local/share"))
-            .join("saferm")
-            .join("trash");
+        let data_dir = dirs::data_dir().or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .map(|h| PathBuf::from(h).join(".local/share"))
+        });
+        let base_dir = match data_dir {
+            Some(dir) => dir,
+            None => {
+                eprintln!(
+                    "saferm: warning: could not determine data directory, using /tmp/saferm/trash"
+                );
+                PathBuf::from("/tmp/saferm")
+            }
+        }
+        .join("saferm")
+        .join("trash");
         Self { base_dir }
     }
 

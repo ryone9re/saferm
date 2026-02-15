@@ -13,11 +13,13 @@ pub struct Cli {
     #[arg(short = 'r', short_alias = 'R', long = "recursive")]
     pub recursive: bool,
 
-    /// Ignore nonexistent files and never prompt
+    /// Ignore nonexistent files; skip confirmation in non-interactive mode
     #[arg(short, long)]
     pub force: bool,
 
-    /// Prompt before every removal (default behavior)
+    /// Prompt before every removal (default behavior).
+    /// Accepted for rm-compatibility but has no additional effect —
+    /// saferm always prompts in interactive (TTY) mode.
     #[arg(short, long)]
     pub interactive: bool,
 
