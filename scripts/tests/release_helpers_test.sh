@@ -88,6 +88,33 @@ EOF
   fi
 }
 
+test_update_version_fails_when_package_version_missing_but_other_table_has_version() {
+  local tmpdir
+  tmpdir="$(mktemp -d)"
+  trap "rm -rf '$tmpdir'" RETURN
+
+  cat >"$tmpdir/Cargo.toml" <<'EOF'
+[package]
+name = "saferm"
+edition = "2024"
+
+[metadata.release]
+version = "9.9.9"
+EOF
+
+  cat >"$tmpdir/Cargo.lock" <<'EOF'
+version = 4
+
+[[package]]
+name = "saferm"
+version = "1.0.1"
+EOF
+
+  if update_version_files "$tmpdir/Cargo.toml" "$tmpdir/Cargo.lock" "1.0.2" >/dev/null 2>&1; then
+    fail "missing package version should fail even when another table has version"
+  fi
+}
+
 test_update_version_fails_when_lockfile_saferm_package_missing() {
   local tmpdir
   tmpdir="$(mktemp -d)"
@@ -119,6 +146,7 @@ main() {
   test_invalid_version_fails
   test_update_version_rewrites_manifest_and_lock
   test_update_version_fails_when_manifest_version_missing
+  test_update_version_fails_when_package_version_missing_but_other_table_has_version
   test_update_version_fails_when_lockfile_saferm_package_missing
   echo "release helper tests: ok"
 }

@@ -9,8 +9,16 @@ update_version_files() {
   local lockfile_tmp="$lockfile.tmp"
 
   awk -v version="$version" '
-    BEGIN { updated = 0 }
-    !updated && /^version = ".*"$/ {
+    BEGIN { in_package = 0; updated = 0 }
+    /^\[package\]$/ {
+      in_package = 1
+      print
+      next
+    }
+    /^\[.*\]$/ {
+      in_package = 0
+    }
+    in_package && !updated && /^version = ".*"$/ {
       print "version = \"" version "\""
       updated = 1
       next
