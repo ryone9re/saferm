@@ -36,9 +36,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          git checkout -B main origin/main
-
-          current_version="$(
+          read_current_version() {
             awk '
               /^\[package\]$/ { in_package = 1; next }
               /^\[.*\]$/ { in_package = 0 }
@@ -49,33 +47,100 @@ jobs:
                 exit
               }
             ' Cargo.toml
-          )"
+          }
+
+          git checkout -B main origin/main
+
+          current_version="$(read_current_version)"
 
           if [[ -z "$current_version" ]]; then
             echo "failed to resolve the current package version from Cargo.toml" >&2
             exit 1
           fi
 
-          if [[ -z "${{ inputs.version }}" ]]; then
-            current_tag="v$current_version"
-            current_subject="chore: release $current_tag"
+          head_sha="$(git rev-parse HEAD)"
+          head_subject="$(git log -1 --format=%s)"
+          recovery_mode=false
+          release_version=""
+          release_tag=""
 
-            if ! git rev-parse -q --verify "refs/tags/$current_tag" >/dev/null &&
-              git log --format=%s | grep -Fxq "$current_subject"; then
-              echo "main already contains an unpublished release commit for $current_tag; recover the in-flight release instead of starting a new patch bump" >&2
+          if [[ "$head_subject" =~ ^chore:\ release\ (v[0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            head_release_tag="${BASH_REMATCH[1]}"
+            if [[ "$head_release_tag" == "v$current_version" ]]; then
+              recovery_mode=true
+              release_version="$current_version"
+              release_tag="$head_release_tag"
+            fi
+          fi
+
+          requested_version="${{ inputs.version }}"
+
+          if [[ -z "$requested_version" ]]; then
+            if [[ "$recovery_mode" != true ]]; then
+              while IFS=$'\t' read -r commit subject; do
+                [[ -n "$commit" ]] || continue
+
+                release_tag_from_history="${subject#chore: release }"
+                if git rev-parse -q --verify "refs/tags/$release_tag_from_history" >/dev/null; then
+                  tag_sha="$(git rev-parse "$release_tag_from_history^{}")"
+                  if [[ "$tag_sha" != "$commit" ]]; then
+                    echo "tag $release_tag_from_history already exists at a different commit" >&2
+                    exit 1
+                  fi
+                  continue
+                fi
+
+                echo "main already contains an unpublished release commit for $release_tag_from_history; recover the in-flight release instead of starting a new patch bump" >&2
+                exit 1
+              done < <(git log --format='%H%x09%s' --grep '^chore: release v[0-9]\+\.[0-9]\+\.[0-9]\+$')
+            fi
+          else
+            requested_release_version="$(bash scripts/release/resolve-version.sh "$requested_version" "$current_version")"
+            requested_release_tag="v$requested_release_version"
+
+            if [[ "$recovery_mode" == true && "$requested_release_tag" == "$release_tag" ]]; then
+              :
+            else
+              recovery_mode=false
+              release_version="$requested_release_version"
+              release_tag="$requested_release_tag"
+              if [[ "$release_version" == "$current_version" ]]; then
+                echo "requested version matches the current package version, but origin/main is not the corresponding release commit to recover" >&2
+                exit 1
+              fi
+            fi
+          fi
+
+          if [[ "$recovery_mode" != true ]]; then
+            release_version="$(bash scripts/release/resolve-version.sh "${requested_version}" "$current_version")"
+            release_tag="v$release_version"
+          fi
+
+          if git rev-parse -q --verify "refs/tags/$release_tag" >/dev/null; then
+            tag_sha="$(git rev-parse "$release_tag^{}")"
+            if [[ "$recovery_mode" == true && "$tag_sha" == "$head_sha" ]]; then
+              :
+            else
+              echo "tag $release_tag already exists at a different commit" >&2
               exit 1
             fi
           fi
 
-          release_version="$(bash scripts/release/resolve-version.sh "${{ inputs.version }}" "$current_version")"
-          release_tag="v$release_version"
+          if [[ "$recovery_mode" == true ]]; then
+            base_sha="$(git rev-parse "$head_sha^")"
+            release_sha="$head_sha"
+            git update-ref refs/heads/release-candidate "$release_sha"
 
-          if git rev-parse -q --verify "refs/tags/$release_tag" >/dev/null; then
-            echo "tag already exists: $release_tag" >&2
-            exit 1
+            {
+              echo "base_sha=$base_sha"
+              echo "release_sha=$release_sha"
+              echo "release_tag=$release_tag"
+              echo "release_version=$release_version"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
-          base_sha="$(git rev-parse HEAD)"
+          base_sha="$head_sha"
 
           bash scripts/release/update-version.sh Cargo.toml Cargo.lock "$release_version"
 
@@ -117,11 +182,13 @@ jobs:
           - target: x86_64-unknown-linux-musl
             runner: ubuntu-latest
             use-cross: true
-            run-validation: true
+            run-style-checks: true
+            run-tests: true
           - target: aarch64-apple-darwin
             runner: macos-latest
             use-cross: false
-            run-validation: false
+            run-style-checks: false
+            run-tests: true
     steps:
       - name: Checkout main
         uses: actions/checkout@v6
@@ -178,11 +245,15 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
-      - name: Validate release candidate
-        if: ${{ matrix.run-validation }}
+      - name: Run fmt and clippy
+        if: ${{ matrix.run-style-checks }}
         run: |
           cargo fmt -- --check
           cargo clippy -- -D warnings
+
+      - name: Run tests
+        if: ${{ matrix.run-tests }}
+        run: |
           cargo test
 
       - name: Install cross

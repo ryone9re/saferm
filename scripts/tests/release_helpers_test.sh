@@ -32,6 +32,18 @@ test_explicit_version_wins() {
   assert_eq "$version" "2.0.0" "explicit version is preserved"
 }
 
+test_same_version_is_allowed_for_recovery() {
+  local version
+  version="$(resolve_version "1.0.1" "1.0.1")"
+  assert_eq "$version" "1.0.1" "same explicit version is allowed for recovery"
+}
+
+test_explicit_version_downgrade_fails() {
+  if resolve_version "1.0.0" "1.0.1" >/dev/null 2>&1; then
+    fail "explicit version downgrade should fail"
+  fi
+}
+
 test_invalid_version_fails() {
   if resolve_version "1.0" "1.0.1" >/dev/null 2>&1; then
     fail "invalid semver should fail"
@@ -149,6 +161,8 @@ EOF
 main() {
   test_patch_bump_when_input_empty
   test_explicit_version_wins
+  test_same_version_is_allowed_for_recovery
+  test_explicit_version_downgrade_fails
   test_invalid_version_fails
   test_resolve_version_rejects_prerelease_suffix
   test_update_version_rewrites_manifest_and_lock
