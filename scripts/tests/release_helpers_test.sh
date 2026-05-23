@@ -64,11 +64,62 @@ EOF
   assert_eq "$(grep '^version = ' "$tmpdir/Cargo.lock" | tail -1)" 'version = "1.0.2"' "lockfile root package version updated"
 }
 
+test_update_version_fails_when_manifest_version_missing() {
+  local tmpdir
+  tmpdir="$(mktemp -d)"
+  trap "rm -rf '$tmpdir'" RETURN
+
+  cat >"$tmpdir/Cargo.toml" <<'EOF'
+[package]
+name = "saferm"
+edition = "2024"
+EOF
+
+  cat >"$tmpdir/Cargo.lock" <<'EOF'
+version = 4
+
+[[package]]
+name = "saferm"
+version = "1.0.1"
+EOF
+
+  if update_version_files "$tmpdir/Cargo.toml" "$tmpdir/Cargo.lock" "1.0.2" >/dev/null 2>&1; then
+    fail "missing manifest version should fail"
+  fi
+}
+
+test_update_version_fails_when_lockfile_saferm_package_missing() {
+  local tmpdir
+  tmpdir="$(mktemp -d)"
+  trap "rm -rf '$tmpdir'" RETURN
+
+  cat >"$tmpdir/Cargo.toml" <<'EOF'
+[package]
+name = "saferm"
+version = "1.0.1"
+edition = "2024"
+EOF
+
+  cat >"$tmpdir/Cargo.lock" <<'EOF'
+version = 4
+
+[[package]]
+name = "another-package"
+version = "1.0.1"
+EOF
+
+  if update_version_files "$tmpdir/Cargo.toml" "$tmpdir/Cargo.lock" "1.0.2" >/dev/null 2>&1; then
+    fail "missing saferm package in lockfile should fail"
+  fi
+}
+
 main() {
   test_patch_bump_when_input_empty
   test_explicit_version_wins
   test_invalid_version_fails
   test_update_version_rewrites_manifest_and_lock
+  test_update_version_fails_when_manifest_version_missing
+  test_update_version_fails_when_lockfile_saferm_package_missing
   echo "release helper tests: ok"
 }
 

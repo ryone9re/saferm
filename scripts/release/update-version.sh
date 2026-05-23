@@ -5,9 +5,29 @@ update_version_files() {
   local manifest="$1"
   local lockfile="$2"
   local version="$3"
+  local manifest_tmp="$manifest.tmp"
+  local lockfile_tmp="$lockfile.tmp"
 
-  sed -i.bak -E "1,/^version = \".*\"$/s/^version = \".*\"$/version = \"$version\"/" "$manifest"
-  rm -f "$manifest.bak"
+  awk -v version="$version" '
+    BEGIN { updated = 0 }
+    !updated && /^version = ".*"$/ {
+      print "version = \"" version "\""
+      updated = 1
+      next
+    }
+    { print }
+    END { if (!updated) exit 1 }
+  ' "$manifest" >"$manifest_tmp" || {
+    rm -f "$manifest_tmp" "$lockfile_tmp"
+    echo "failed to update manifest version in $manifest" >&2
+    return 1
+  }
+
+  if cmp -s "$manifest" "$manifest_tmp"; then
+    rm -f "$manifest_tmp" "$lockfile_tmp"
+    echo "manifest version unchanged in $manifest" >&2
+    return 1
+  fi
 
   awk -v version="$version" '
     BEGIN { in_saferm = 0; updated = 0 }
@@ -19,8 +39,21 @@ update_version_files() {
       next
     }
     { print }
-  ' "$lockfile" >"$lockfile.tmp"
-  mv "$lockfile.tmp" "$lockfile"
+    END { if (!updated) exit 1 }
+  ' "$lockfile" >"$lockfile_tmp" || {
+    rm -f "$manifest_tmp" "$lockfile_tmp"
+    echo "failed to update saferm package version in $lockfile" >&2
+    return 1
+  }
+
+  if cmp -s "$lockfile" "$lockfile_tmp"; then
+    rm -f "$manifest_tmp" "$lockfile_tmp"
+    echo "saferm package version unchanged in $lockfile" >&2
+    return 1
+  fi
+
+  mv "$manifest_tmp" "$manifest"
+  mv "$lockfile_tmp" "$lockfile"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
