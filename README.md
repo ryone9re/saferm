@@ -83,18 +83,14 @@ Pull requests and pushes to `main` are checked automatically on both Ubuntu and 
 - `cargo clippy -- -D warnings`
 - `cargo test`
 
-When a version tag (`v*`) is pushed, the release workflow builds static binaries for 2 targets and publishes a GitHub Release:
+Releases are started manually from GitHub Actions via `Actions > Release > Run workflow`. The workflow always prepares the release from `main`, updates `Cargo.toml` and `Cargo.lock`, validates the release candidate, and builds the supported release artifacts before publish.
+
+Leave the version input empty to auto-bump the current patch version. Provide a version such as `1.2.0` to override the automatic bump. After approval from the GitHub `release` environment, the workflow publishes the prepared release by updating `main` when needed, ensuring the matching version tag (`v<release_version>`) exists, and creating the GitHub Release:
 
 | Target | Binary type |
 |--------|-------------|
 | `x86_64-unknown-linux-musl` | Static (musl, no glibc dependency) |
 | `aarch64-apple-darwin` | Native (Apple Silicon) |
-
-```bash
-# Create a release / リリースを作成
-git tag v1.2.0
-git push origin v1.2.0
-```
 
 ---
 
@@ -104,18 +100,14 @@ git push origin v1.2.0
 - `cargo clippy -- -D warnings`
 - `cargo test`
 
-バージョンタグ (`v*`) を push すると、リリースワークフローが2ターゲットのバイナリをビルドし GitHub Release を作成します:
+リリースは GitHub Actions の `Actions > Release > Run workflow` から手動で開始します。ワークフローは常に `main` からリリース候補を作成し、`Cargo.toml` と `Cargo.lock` を更新し、publish 前にリリース候補を検証して対応する release artifact をビルドします。
+
+version 入力を空のままにすると現在の patch バージョンを自動でインクリメントします。`1.2.0` のようなバージョンを指定すると自動 bump を上書きします。GitHub の `release` environment で承認されると、ワークフローは必要に応じて `main` を更新し、対応する version tag (`v<release_version>`) の存在を保証して、GitHub Release を公開します:
 
 | ターゲット | バイナリ種別 |
 |--------|-------------|
 | `x86_64-unknown-linux-musl` | 静的リンク (musl、glibc 依存なし) |
 | `aarch64-apple-darwin` | ネイティブ (Apple Silicon) |
-
-```bash
-# Create a release / リリースを作成
-git tag v1.2.0
-git push origin v1.2.0
-```
 
 ## Development / 開発
 
