@@ -38,6 +38,12 @@ test_invalid_version_fails() {
   fi
 }
 
+test_resolve_version_rejects_prerelease_suffix() {
+  if resolve_version "1.0.2-rc1" "1.0.1" >/dev/null 2>&1; then
+    fail "prerelease versions should fail in the first implementation"
+  fi
+}
+
 test_update_version_rewrites_manifest_and_lock() {
   local tmpdir
   tmpdir="$(mktemp -d)"
@@ -144,6 +150,7 @@ main() {
   test_patch_bump_when_input_empty
   test_explicit_version_wins
   test_invalid_version_fails
+  test_resolve_version_rejects_prerelease_suffix
   test_update_version_rewrites_manifest_and_lock
   test_update_version_fails_when_manifest_version_missing
   test_update_version_fails_when_package_version_missing_but_other_table_has_version

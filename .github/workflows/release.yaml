@@ -1,15 +1,114 @@
 name: Release
 
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version (X.Y.Z). Leave empty to bump the current patch version.
+        required: false
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    name: Build ${{ matrix.target }}
+  prepare:
+    name: Prepare release candidate
+    runs-on: ubuntu-latest
+    outputs:
+      base_sha: ${{ steps.prepare.outputs.base_sha }}
+      release_sha: ${{ steps.prepare.outputs.release_sha }}
+      release_tag: ${{ steps.prepare.outputs.release_tag }}
+      release_version: ${{ steps.prepare.outputs.release_version }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Fetch main and tags
+        run: git fetch --force --tags origin main
+
+      - name: Prepare release commit
+        id: prepare
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git checkout -B main origin/main
+
+          current_version="$(
+            awk '
+              /^\[package\]$/ { in_package = 1; next }
+              /^\[.*\]$/ { in_package = 0 }
+              in_package && /^version = "/ {
+                gsub(/^version = "/, "", $0)
+                gsub(/"$/, "", $0)
+                print
+                exit
+              }
+            ' Cargo.toml
+          )"
+
+          if [[ -z "$current_version" ]]; then
+            echo "failed to resolve the current package version from Cargo.toml" >&2
+            exit 1
+          fi
+
+          if [[ -z "${{ inputs.version }}" ]]; then
+            current_tag="v$current_version"
+            current_subject="chore: release $current_tag"
+
+            if ! git rev-parse -q --verify "refs/tags/$current_tag" >/dev/null &&
+              git log --format=%s | grep -Fxq "$current_subject"; then
+              echo "main already contains an unpublished release commit for $current_tag; recover the in-flight release instead of starting a new patch bump" >&2
+              exit 1
+            fi
+          fi
+
+          release_version="$(bash scripts/release/resolve-version.sh "${{ inputs.version }}" "$current_version")"
+          release_tag="v$release_version"
+
+          if git rev-parse -q --verify "refs/tags/$release_tag" >/dev/null; then
+            echo "tag already exists: $release_tag" >&2
+            exit 1
+          fi
+
+          base_sha="$(git rev-parse HEAD)"
+
+          bash scripts/release/update-version.sh Cargo.toml Cargo.lock "$release_version"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock
+          git commit -m "chore: release $release_tag"
+
+          release_sha="$(git rev-parse HEAD)"
+          git update-ref refs/heads/release-candidate "$release_sha"
+
+          {
+            echo "base_sha=$base_sha"
+            echo "release_sha=$release_sha"
+            echo "release_tag=$release_tag"
+            echo "release_version=$release_version"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Bundle release candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git bundle create "$RUNNER_TEMP/release-candidate.bundle" refs/heads/release-candidate
+
+      - name: Upload release candidate bundle
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-candidate
+          path: ${{ runner.temp }}/release-candidate.bundle
+
+  verify-build:
+    name: Verify and build ${{ matrix.target }}
+    needs: prepare
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -18,16 +117,60 @@ jobs:
           - target: x86_64-unknown-linux-musl
             runner: ubuntu-latest
             use-cross: true
+            run-validation: true
           - target: aarch64-apple-darwin
             runner: macos-latest
             use-cross: false
+            run-validation: false
     steps:
-      - name: Checkout
+      - name: Checkout main
         uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Download release candidate bundle
+        uses: actions/download-artifact@v7
+        with:
+          name: release-candidate
+          path: ${{ runner.temp }}/release-candidate
+
+      - name: Restore release candidate
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.release_version }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+          BASE_SHA: ${{ needs.prepare.outputs.base_sha }}
+        run: |
+          set -euo pipefail
+
+          bundle_path="${RUNNER_TEMP}/release-candidate/release-candidate.bundle"
+          git fetch "$bundle_path" "refs/heads/release-candidate:refs/heads/release-candidate"
+          git checkout --detach "$RELEASE_SHA"
+
+          actual_version="$(
+            awk '
+              /^\[package\]$/ { in_package = 1; next }
+              /^\[.*\]$/ { in_package = 0 }
+              in_package && /^version = "/ {
+                gsub(/^version = "/, "", $0)
+                gsub(/"$/, "", $0)
+                print
+                exit
+              }
+            ' Cargo.toml
+          )"
+
+          [[ "$(git rev-parse HEAD)" == "$RELEASE_SHA" ]]
+          [[ "$(git rev-parse HEAD^)" == "$BASE_SHA" ]]
+          [[ "$actual_version" == "$RELEASE_VERSION" ]]
+          [[ "v$actual_version" == "$RELEASE_TAG" ]]
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
+          components: rustfmt, clippy
           targets: ${{ matrix.target }}
 
       - name: Cache
@@ -35,23 +178,31 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
+      - name: Validate release candidate
+        if: ${{ matrix.run-validation }}
+        run: |
+          cargo fmt -- --check
+          cargo clippy -- -D warnings
+          cargo test
+
       - name: Install cross
-        if: matrix.use-cross
+        if: ${{ matrix.use-cross }}
         run: cargo install cross --git https://github.com/cross-rs/cross
 
       - name: Build (cross)
-        if: matrix.use-cross
+        if: ${{ matrix.use-cross }}
         run: cross build --release --target ${{ matrix.target }}
 
       - name: Build (cargo)
-        if: "!matrix.use-cross"
+        if: ${{ !matrix.use-cross }}
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Archive
+        shell: bash
         run: |
-          cd target/${{ matrix.target }}/release
-          tar czf ../../../saferm-${{ matrix.target }}.tar.gz saferm
-          cd ../../..
+          set -euo pipefail
+          cd "target/${{ matrix.target }}/release"
+          tar czf "../../../saferm-${{ matrix.target }}.tar.gz" saferm
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6
@@ -59,20 +210,120 @@ jobs:
           name: saferm-${{ matrix.target }}
           path: saferm-${{ matrix.target }}.tar.gz
 
-  release:
-    name: Create Release
-    needs: build
+  publish:
+    name: Publish release
+    needs:
+      - prepare
+      - verify-build
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: write
     steps:
-      - name: Download artifacts
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PUSH_TOKEN }}
+
+      - name: Download release candidate bundle
         uses: actions/download-artifact@v7
         with:
+          name: release-candidate
+          path: ${{ runner.temp }}/release-candidate
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: saferm-*
           merge-multiple: true
+          path: ${{ runner.temp }}/release-artifacts
+
+      - name: Restore and validate release candidate
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.release_version }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+          BASE_SHA: ${{ needs.prepare.outputs.base_sha }}
+        run: |
+          set -euo pipefail
+
+          bundle_path="${RUNNER_TEMP}/release-candidate/release-candidate.bundle"
+          git fetch "$bundle_path" "refs/heads/release-candidate:refs/heads/release-candidate"
+          git checkout --detach "$RELEASE_SHA"
+          git fetch --force --tags origin main
+
+          actual_version="$(
+            awk '
+              /^\[package\]$/ { in_package = 1; next }
+              /^\[.*\]$/ { in_package = 0 }
+              in_package && /^version = "/ {
+                gsub(/^version = "/, "", $0)
+                gsub(/"$/, "", $0)
+                print
+                exit
+              }
+            ' Cargo.toml
+          )"
+
+          [[ "$(git rev-parse HEAD)" == "$RELEASE_SHA" ]]
+          [[ "$(git rev-parse HEAD^)" == "$BASE_SHA" ]]
+          [[ "$actual_version" == "$RELEASE_VERSION" ]]
+          [[ "v$actual_version" == "$RELEASE_TAG" ]]
+
+          remote_main_sha="$(git rev-parse origin/main)"
+          if [[ "$remote_main_sha" != "$BASE_SHA" && "$remote_main_sha" != "$RELEASE_SHA" ]]; then
+            echo "origin/main is neither the prepared base nor the release commit" >&2
+            exit 1
+          fi
+
+          if git rev-parse -q --verify "refs/tags/$RELEASE_TAG" >/dev/null; then
+            tag_sha="$(git rev-parse "$RELEASE_TAG^{}")"
+            if [[ "$tag_sha" != "$RELEASE_SHA" ]]; then
+              echo "tag $RELEASE_TAG already exists at a different commit" >&2
+              exit 1
+            fi
+          fi
+
+      - name: Push validated release commit and tag
+        shell: bash
+        env:
+          BASE_SHA: ${{ needs.prepare.outputs.base_sha }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch --force --tags origin main
+
+          remote_main_sha="$(git rev-parse origin/main)"
+          if [[ "$remote_main_sha" == "$BASE_SHA" ]]; then
+            git push origin "$RELEASE_SHA:refs/heads/main"
+          elif [[ "$remote_main_sha" != "$RELEASE_SHA" ]]; then
+            echo "origin/main is neither the prepared base nor the release commit" >&2
+            exit 1
+          fi
+
+          if git rev-parse -q --verify "refs/tags/$RELEASE_TAG" >/dev/null; then
+            tag_sha="$(git rev-parse "$RELEASE_TAG^{}")"
+            if [[ "$tag_sha" != "$RELEASE_SHA" ]]; then
+              echo "tag $RELEASE_TAG already exists at a different commit" >&2
+              exit 1
+            fi
+          else
+            git tag -a "$RELEASE_TAG" "$RELEASE_SHA" -m "$RELEASE_TAG"
+            git push origin "refs/tags/$RELEASE_TAG"
+          fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.prepare.outputs.release_tag }}
+          target_commitish: ${{ needs.prepare.outputs.release_sha }}
           generate_release_notes: true
-          files: saferm-*.tar.gz
+          files: ${{ runner.temp }}/release-artifacts/saferm-*.tar.gz
+          token: ${{ secrets.RELEASE_PUSH_TOKEN }}
