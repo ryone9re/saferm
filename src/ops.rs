@@ -38,45 +38,48 @@ fn process_target(
     prompter: &dyn Prompter,
     is_tty: bool,
 ) -> Result<()> {
+    let name = target.display().to_string();
+    let is_symlink = target.is_symlink();
+    let is_dir = target.is_dir() && !is_symlink;
+
     // Check existence
-    if !target.exists() && !target.is_symlink() {
+    if !target.exists() && !is_symlink {
         if cli.force {
             return Ok(());
         }
-        anyhow::bail!(t!("error_not_found", name = target.display().to_string()));
+        anyhow::bail!(t!("error_not_found", name = name.clone()));
     }
 
     // Directory check — symlinks to directories are treated as symlinks, not directories.
     // Real rm removes symlinks without -r regardless of what they point to.
-    if target.is_dir() && !target.is_symlink() {
+    if is_dir {
         if !cli.recursive && !cli.dir {
-            anyhow::bail!(t!("error_is_dir", name = target.display().to_string()));
+            anyhow::bail!(t!("error_is_dir", name = name.clone()));
         }
         // -d flag only works for empty directories
         if cli.dir && !cli.recursive && target.read_dir()?.next().is_some() {
-            anyhow::bail!(t!("error_is_dir", name = target.display().to_string()));
+            anyhow::bail!(t!("error_is_dir", name = name.clone()));
         }
     }
 
     // Non-TTY without -f: refuse with a clear error (never attempt interactive prompt)
     if !is_tty && !cli.force {
-        anyhow::bail!(t!(
-            "error_non_interactive",
-            name = target.display().to_string()
-        ));
+        anyhow::bail!(t!("error_non_interactive", name = name.clone()));
     }
 
     // TTY: always prompt (even with -f — saferm's core safety feature)
     if is_tty {
-        let msg = if target.is_dir() && !target.is_symlink() {
-            t!("confirm_trash_dir", name = target.display().to_string())
+        let msg = if is_symlink {
+            t!("confirm_delete_symlink", name = name.clone())
+        } else if is_dir {
+            t!("confirm_trash_dir", name = name.clone())
         } else {
-            t!("confirm_trash", name = target.display().to_string())
+            t!("confirm_trash", name = name.clone())
         };
 
         if !prompter.confirm(&msg)? {
             if cli.verbose {
-                eprintln!("{}", t!("cancelled", name = target.display().to_string()));
+                eprintln!("{}", t!("cancelled", name = name.clone()));
             }
             return Ok(());
         }
@@ -87,14 +90,16 @@ fn process_target(
     handler.trash(target)?;
 
     if cli.verbose {
-        println!(
-            "{}",
+        let msg = if is_symlink {
+            t!("verbose_removed_symlink", name = name)
+        } else {
             t!(
                 "verbose_trashed_with_backend",
-                name = target.display().to_string(),
+                name = name,
                 backend = handler.backend_name()
             )
-        );
+        };
+        println!("{}", msg);
     }
 
     Ok(())
@@ -408,6 +413,42 @@ mod tests {
         }
     }
 
+    struct CaptureConfirmPrompter {
+        message: RefCell<Option<String>>,
+    }
+
+    impl CaptureConfirmPrompter {
+        fn new() -> Self {
+            Self {
+                message: RefCell::new(None),
+            }
+        }
+
+        fn confirm_message(&self) -> Option<String> {
+            self.message.borrow().clone()
+        }
+    }
+
+    impl Prompter for CaptureConfirmPrompter {
+        fn confirm(&self, message: &str) -> Result<bool> {
+            self.message.borrow_mut().replace(message.to_string());
+            Ok(false)
+        }
+
+        fn select(&self, _message: &str, _options: &[String], default: usize) -> Result<usize> {
+            Ok(default)
+        }
+
+        fn multi_select(
+            &self,
+            _message: &str,
+            _options: &[String],
+            _defaults: &[bool],
+        ) -> Result<Vec<usize>> {
+            Ok(vec![])
+        }
+    }
+
     fn make_cli(targets: Vec<PathBuf>, force: bool, recursive: bool, verbose: bool) -> Cli {
         Cli {
             targets,
@@ -507,6 +548,34 @@ mod tests {
         let result = process_target(&file, &cli, &handler, &DenyPrompter, true);
 
         assert!(result.is_ok());
+        assert!(handler.trashed_paths().is_empty());
+    }
+
+    #[test]
+    fn test_symlink_prompt_uses_delete_message() {
+        rust_i18n::set_locale("en");
+
+        let tmp = TempDir::new().unwrap();
+        let target = tmp.path().join("target.txt");
+        let link = tmp.path().join("link.txt");
+        fs::write(&target, "hello").unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        let handler = MockTrash::new();
+        let cli = make_cli(vec![link.clone()], false, false, false);
+        let prompter = CaptureConfirmPrompter::new();
+        let expected = format!(
+            "Delete symbolic link '{}'? The target will not be removed.",
+            link.display()
+        );
+
+        let result = process_target(&link, &cli, &handler, &prompter, true);
+
+        assert!(result.is_ok());
+        assert_eq!(
+            prompter.confirm_message().as_deref(),
+            Some(expected.as_str())
+        );
         assert!(handler.trashed_paths().is_empty());
     }
 

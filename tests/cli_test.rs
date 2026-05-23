@@ -175,6 +175,32 @@ fn test_symlink() {
 }
 
 #[test]
+fn test_verbose_symlink_reports_link_removal() {
+    let tmp = TempDir::new().unwrap();
+    let target = tmp.path().join("target.txt");
+    let link = tmp.path().join("link.txt");
+    fs::write(&target, "target content").unwrap();
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+
+    saferm()
+        .args(["-fv", link.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("link.txt").and(
+                predicate::str::contains("symbolic link")
+                    .or(predicate::str::contains("シンボリックリンク")),
+            ),
+        );
+
+    assert!(
+        link.symlink_metadata().is_err(),
+        "Symlink should have been removed"
+    );
+    assert!(target.exists(), "Target should still exist");
+}
+
+#[test]
 fn test_unicode_filename() {
     let tmp = TempDir::new().unwrap();
     let file = tmp.path().join("日本語ファイル.txt");
