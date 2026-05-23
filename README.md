@@ -85,6 +85,8 @@ Pull requests and pushes to `main` are checked automatically on both Ubuntu and 
 
 Releases are started manually from GitHub Actions via `Actions > Release > Run workflow`. The workflow always prepares the release from `main`, updates `Cargo.toml` and `Cargo.lock`, validates the release candidate, and builds the supported release artifacts before publish.
 
+Before the first release, create the GitHub `release` environment, add reviewer rules if you want approval, and store a publish credential as the `RELEASE_PUSH_TOKEN` repository secret or `release` environment secret.
+
 Leave the version input empty to auto-bump the current patch version. Provide a version such as `1.2.0` to override the automatic bump. After approval from the GitHub `release` environment, the workflow publishes the prepared release by updating `main` when needed, ensuring the matching version tag (`v<release_version>`) exists, and creating the GitHub Release:
 
 | Target | Binary type |
@@ -101,6 +103,8 @@ Leave the version input empty to auto-bump the current patch version. Provide a 
 - `cargo test`
 
 リリースは GitHub Actions の `Actions > Release > Run workflow` から手動で開始します。ワークフローは常に `main` からリリース候補を作成し、`Cargo.toml` と `Cargo.lock` を更新し、publish 前にリリース候補を検証して対応する release artifact をビルドします。
+
+初回リリース前に、GitHub の `release` environment を作成し、承認を入れたい場合は reviewer rule を設定し、publish 用 credential を `RELEASE_PUSH_TOKEN` という repository secret か `release` environment secret として登録してください。
 
 version 入力を空のままにすると現在の patch バージョンを自動でインクリメントします。`1.2.0` のようなバージョンを指定すると自動 bump を上書きします。GitHub の `release` environment で承認されると、ワークフローは必要に応じて `main` を更新し、対応する version tag (`v<release_version>`) の存在を保証して、GitHub Release を公開します:
 
