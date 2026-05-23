@@ -85,6 +85,8 @@ Pull requests and pushes to `main` are checked automatically on both Ubuntu and 
 
 Releases are started manually from GitHub Actions via `Actions > Release > Run workflow`. The workflow always prepares the release from `main`, updates `Cargo.toml` and `Cargo.lock`, validates the release candidate, and builds the supported release artifacts before publish.
 
+Before the first release, create and install a GitHub App for this repository, grant it `Contents: Read and write`, add the app to the `main` ruleset bypass list as `Always allow`, store the app client ID in the `RELEASE_APP_CLIENT_ID` repository variable, and store the private key in the `RELEASE_APP_PRIVATE_KEY` repository secret or `release` environment secret.
+
 Leave the version input empty to auto-bump the current patch version. Provide a version such as `1.2.0` to override the automatic bump. After approval from the GitHub `release` environment, the workflow publishes the prepared release by updating `main` when needed, ensuring the matching version tag (`v<release_version>`) exists, and creating the GitHub Release:
 
 | Target | Binary type |
@@ -101,6 +103,8 @@ Leave the version input empty to auto-bump the current patch version. Provide a 
 - `cargo test`
 
 リリースは GitHub Actions の `Actions > Release > Run workflow` から手動で開始します。ワークフローは常に `main` からリリース候補を作成し、`Cargo.toml` と `Cargo.lock` を更新し、publish 前にリリース候補を検証して対応する release artifact をビルドします。
+
+初回リリース前に、この repository 用の GitHub App を作成して install し、`Contents: Read and write` を付与し、`main` ruleset の bypass list にその App を `Always allow` で追加し、app client ID を `RELEASE_APP_CLIENT_ID` repository variable に、private key を `RELEASE_APP_PRIVATE_KEY` repository secret か `release` environment secret に登録してください。
 
 version 入力を空のままにすると現在の patch バージョンを自動でインクリメントします。`1.2.0` のようなバージョンを指定すると自動 bump を上書きします。GitHub の `release` environment で承認されると、ワークフローは必要に応じて `main` を更新し、対応する version tag (`v<release_version>`) の存在を保証して、GitHub Release を公開します:
 
